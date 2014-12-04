@@ -48,10 +48,6 @@ def floatfromhex(h):
 # than noted that the temperature values I got seemed reasonable.
 #
 def calcTmpTarget(objT, ambT):
-    mqtt = mosquitto.Mosquitto()
-    mqtt.connect(host, port)
-    mqtt.loop_start()
-    topic = prefix + bluetooth_adr +"/celsius"
     m_tmpAmb = ambT/128.0
     Vobj2 = objT * 0.00000015625
     Tdie2 = m_tmpAmb + 273.15
@@ -68,15 +64,10 @@ def calcTmpTarget(objT, ambT):
     fObj = (Vobj2 - Vos) + c2*pow((Vobj2 - Vos),2)
     tObj = pow(pow(Tdie2,4) + (fObj/S),.25)
     tObj = (tObj - 273.15)
-    payload = "%.2f" % tObj
-    print topic, payload
-    mqtt.publish(topic, payload, qos=0, retain=False)
-    mqtt.loop_stop()
-    mqtt.disconnect()
-    
+    return "%.2f" % tObj
 
-
-
+## Here is where it starts
+#
 tool = pexpect.spawn('gatttool -b ' + bluetooth_adr + ' --interactive')
 tool.expect('.*\[LE\]>', timeout=600)
 print "Preparing to connect. You might need to press the side button..."
@@ -87,14 +78,29 @@ tool.sendline('connect')
 tool.expect('Connection successful.*\[LE\]>')
 tool.sendline('char-write-cmd 0x29 01')
 tool.expect('\[LE\]>')
+# Initialize mqtt
+topic = prefix + bluetooth_adr +"/celsius"
+mqtt = mosquitto.Mosquitto()
+mqtt.connect(host, port)
+mqtt.loop_start()
+# Loop forever and read sensor tag each iteration.
+# The result is published to mqtt
 while True:
-    time.sleep(1)
     tool.sendline('char-read-hnd 0x25')
     tool.expect('descriptor: .*') 
     rval = tool.after.split()
     objT = floatfromhex(rval[2] + rval[1])
     ambT = floatfromhex(rval[4] + rval[3])
     #print rval
-    calcTmpTarget(objT, ambT)
+    payload = calcTmpTarget(objT, ambT)
+    # publish to mqtt
+    print topic, payload
+    mqtt.publish(topic, payload, qos=0, retain=False)
+    # sleep five seconds
+    time.sleep(5)
+# close mqtt
+mqtt.loop_stop()
+mqtt.disconnect()
+
 
 
